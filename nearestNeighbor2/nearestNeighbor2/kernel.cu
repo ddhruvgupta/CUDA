@@ -1,4 +1,7 @@
-
+/*
+Parallel Algorithms Homework 3
+Team Members: Dhruv Gupta and Sravya Kambhapathi
+*/
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
 #include "opencv2/opencv.hpp"
@@ -7,6 +10,7 @@
 #include <opencv2/highgui/highgui.hpp>
 #include "opencv2/imgproc/imgproc.hpp"
 #include <math.h>
+#include <stdlib.h>
 //#include "opencv2/cudawarping.hpp"
 #include <stdio.h>
 #include <helper_cuda.h>
@@ -15,15 +19,15 @@
 #endif
 #include <device_functions.h>
 
-#define BLUR_SIZE 2
+
 
 using namespace cv;
 using namespace std;
 
-cudaError_t blurWithCuda(uchar* in, uchar* out, int w, int h);
+cudaError_t blurWithCuda(uchar* in, uchar* out, int w, int h, int SCALE);
 //void blurKernel(uchar * in, uchar * out, int w, int h);
 
-
+int SCALE = 2;
 
 __global__ void addKernel(int *c, const int *a, const int *b)
 {
@@ -40,8 +44,8 @@ __global__ void blurKernel(uchar* in, uchar* out, int w, int h) {
         int pixVal = 0;
         int pixels = 0;
 
-        for (int blurRow = -BLUR_SIZE; blurRow < BLUR_SIZE + 1; ++blurRow) {
-            for (int blurCol = -BLUR_SIZE; blurCol < BLUR_SIZE + 1; ++blurCol) {
+        for (int blurRow = -SCALE; blurRow < SCALE + 1; ++blurRow) {
+            for (int blurCol = -SCALE; blurCol < SCALE + 1; ++blurCol) {
                 int curRow = Row + blurRow;
                 int curCol = Col + blurCol;
 
@@ -58,49 +62,64 @@ __global__ void blurKernel(uchar* in, uchar* out, int w, int h) {
 */
 
 __global__ 
-void blurKernel(uchar* in, uchar* out, int w, int h) {
+void blurKernel(uchar* in, uchar* out, int w, int h, int SCALE) {
     int i = blockDim.y * blockIdx.y + threadIdx.y;
     int j = blockDim.x * blockIdx.x + threadIdx.x;
 
-    if (i < h*BLUR_SIZE && j < w* BLUR_SIZE)
+    if (i < h*SCALE && j < w* SCALE)
     {
-        int iIn = (i / BLUR_SIZE);
-        int jIn = (j / BLUR_SIZE);
-        out[i * w*BLUR_SIZE + j] = in[iIn * w + jIn];
+        int iIn = (i / SCALE);
+        int jIn = (j / SCALE);
+        out[i * w*SCALE + j] = in[iIn * w + jIn];
     }
 }
 
 int main(int argc, char* argv[])
 {
-    Mat image = imread("lena512.bmp", IMREAD_GRAYSCALE);   // Read the file
-    //Mat image = imread("lena512.bmp");
+
+    //Mat image = imread("lena512.bmp", IMREAD_GRAYSCALE);   // Read the file
+    
+    const char* name;
+    if (argc < 2) {
+        printf("usage: nearestNeighbor2.exe <filename> <scale>");
+        //strcpy(name, "lena512.bmp");
+        name = "lena512.bmp";
+    }else {
+        char* pEnd;
+        //strcpy(name,argv[2]);
+        name = argv[1];
+        SCALE = (int)strtol(argv[2], &pEnd, 10);
+    }
+
+    Mat image;
+    image = imread(name, IMREAD_GRAYSCALE);
     namedWindow("Display window", WINDOW_AUTOSIZE);
     imshow("Display window", image);
     //waitKey(0);
 
+    
+    //std::cout << image.channels();
 
     // import image
 
     int rows = image.rows;
     int cols = image.cols;
-
-    //float scale = 5.0f;
     uchar* in = image.data;
 
 
-    uchar * out = (uchar *) malloc(rows * cols * BLUR_SIZE * BLUR_SIZE+1);
+    uchar * out = (uchar *) malloc(rows * cols * SCALE * SCALE+1);
 
 
     // Add vectors in parallel.
 
-    cudaError_t cudaStatus = blurWithCuda(in, out, cols, rows);
+    cudaError_t cudaStatus = blurWithCuda(in, out, cols, rows, SCALE);
     
     if (cudaStatus != cudaSuccess) {
         fprintf(stderr, "addWithCuda failed!");
         return 1;
     }
 
-    Mat out_mat  = Mat(rows* BLUR_SIZE, cols* BLUR_SIZE, CV_8UC1, out);
+    Mat out_mat  = Mat(rows* SCALE, cols* SCALE, CV_8UC1, out);
     
     namedWindow("Display window2", WINDOW_AUTOSIZE);
     imshow("Display window2", out_mat);
@@ -125,7 +144,7 @@ int main(int argc, char* argv[])
 
 
 
-cudaError_t blurWithCuda(uchar* in, uchar* out, int w, int h)
+cudaError_t blurWithCuda(uchar* in, uchar* out, int w, int h, int SCALE)
 {
     uchar * dPin;
     uchar * dPout;
@@ -135,7 +154,7 @@ cudaError_t blurWithCuda(uchar* in, uchar* out, int w, int h)
     //dim3 dimGrid(ceil(h / 16.0), ceil(w / 16.0), 1);
     //dim3 dimBlock(16, 16, 1);
     dim3 dimBlock(16, 16);
-    dim3 dimGrid( ((w* BLUR_SIZE)/16)+1 , ((h * BLUR_SIZE)/16) +1);
+    dim3 dimGrid( ((w* SCALE)/16)+1 , ((h * SCALE)/16) +1);
 
     // Choose which GPU to run on, change this on a multi-GPU system.
     cudaStatus = cudaSetDevice(0);
@@ -151,7 +170,7 @@ cudaError_t blurWithCuda(uchar* in, uchar* out, int w, int h)
         goto Error;
     }
 
-    cudaStatus = cudaMalloc((void**)&dPout, BLUR_SIZE * BLUR_SIZE *w * h * sizeof(uchar));
+    cudaStatus = cudaMalloc((void**)&dPout, SCALE * SCALE *w * h * sizeof(uchar));
     if (cudaStatus != cudaSuccess) {
         fprintf(stderr, "cudaMalloc failed!");
         goto Error;
@@ -173,7 +192,7 @@ cudaError_t blurWithCuda(uchar* in, uchar* out, int w, int h)
 
     // Launch a kernel on the GPU with one thread for each element.
     //addKernel<<<1, size>>>(dev_c, dev_a, dev_b);
-    blurKernel<<< dimGrid, dimBlock >>> (dPin, dPout, w, h);
+    blurKernel <<< dimGrid, dimBlock >>> (dPin, dPout, w, h, SCALE);
     // Check for any errors launching the kernel
     cudaStatus = cudaGetLastError();
     if (cudaStatus != cudaSuccess) {
@@ -190,7 +209,7 @@ cudaError_t blurWithCuda(uchar* in, uchar* out, int w, int h)
     }
 
     // Copy output vector from GPU buffer to host memory.
-    cudaStatus = cudaMemcpy(out, dPout, w * h * BLUR_SIZE * BLUR_SIZE* sizeof(uchar), cudaMemcpyDeviceToHost);
+    cudaStatus = cudaMemcpy(out, dPout, w * h * SCALE * SCALE* sizeof(uchar), cudaMemcpyDeviceToHost);
     if (cudaStatus != cudaSuccess) {
         fprintf(stderr, "cudaMemcpy failed!");
         goto Error;
